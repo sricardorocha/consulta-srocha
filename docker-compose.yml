@@ -1,6 +1,6 @@
 # Consulta Srocha - projeto Docker da VPS (Hostinger KVM 2)
 # Endereco da API: https://consulta.srv1833889.hstgr.cloud
-# Unica coisa a preencher: USUARIOS (login:senha separados por ;) no servico "api".
+# Unica coisa a preencher: variavel USUARIOS na secao Ambiente (login:senha separados por ;).
 
 services:
   base:
@@ -17,7 +17,7 @@ services:
       exec python -u /opt/consulta-srocha-main/sync.py"
 
   calculadora:
-    image: eclipse-temurin:25-jdk
+    image: maven:3.9-eclipse-temurin-25
     restart: unless-stopped
     mem_limit: 1536m
     volumes:
@@ -27,8 +27,8 @@ services:
       (test -d /opt/calc/rtc/.git || git clone -q --depth 1 https://github.com/ReceitaFederal/calculadora-rtc-regime-regular.git /opt/calc/rtc) &&
       cd /opt/calc/rtc && git fetch -q --depth 1 origin && git reset -q --hard FETCH_HEAD &&
       mkdir -p calculadora/db && rm -f calculadora/db/calculadora-pro.db &&
-      ./mvnw -q -B flyway:migrate -Dflyway.configFiles=./flyway/flyway-pro.conf &&
-      ./mvnw -q -B -DskipTests clean package &&
+      mvn -q -B flyway:migrate -Dflyway.configFiles=./flyway/flyway-pro.conf &&
+      mvn -q -B -DskipTests clean package &&
       exec java -Xmx768m -Dspring.profiles.active=offline -jar target/api-regime-geral.jar"
 
   api:
@@ -39,7 +39,7 @@ services:
     environment:
       DATA_DIR: /data
       CALCULADORA_URL: http://calculadora:8080/api
-      USUARIOS: "sergio:TROCAR_SENHA_SERGIO;debora:TROCAR_SENHA_DEBORA"
+      USUARIOS: ${USUARIOS}
     volumes:
       - dados:/data
     command: >
