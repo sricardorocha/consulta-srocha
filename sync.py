@@ -4,7 +4,8 @@
 Todo dia (05:00 de Brasilia) e na partida do container:
   1. atualiza os repositorios-fonte do GitHub;
   2. gera a base oficial da Receita (scripts flyway) em SQLite;
-  3. roda o ingest.py e troca a base de consulta de forma atomica;
+  3. baixa o RICMS-SP (Sefaz-SP) e o RICMS-ES (Sefaz-ES) - estadual.py;
+  4. roda o ingest.py e troca a base de consulta de forma atomica;
   4. grava /data/status.json (o que foi atualizado, quando, e erros).
 """
 import datetime, glob, json, os, re, shutil, sqlite3, subprocess, sys, time, traceback
@@ -73,6 +74,20 @@ def rodada():
         st['base_receita'] = base_receita(os.path.join(DATA, 'rf_oficial.db'))
     except Exception:
         st['erros'].append('base_receita: ' + traceback.format_exc()[-400:])
+    try:
+        sys.path.insert(0, AQUI)
+        import estadual
+        est = estadual.baixar(os.path.join(SRC, 'estadual'))
+        if any(e.startswith('sp_integral') for e in est['erros']):
+            time.sleep(90)
+            est = estadual.baixar(os.path.join(SRC, 'estadual'))
+        st['estadual'] = {'quando': est['quando'], 'arquivos': len(est['arquivos']), 'es_anexos': est.get('es_anexos'),
+                          'avisos': est['erros'][:20]}
+        principais = [e for e in est['erros'] if e.startswith(('sp_integral', 'es_pagina', 'es:'))]
+        if principais:
+            st['erros'].append('estadual (usada a copia anterior): ' + '; '.join(principais)[:400])
+    except Exception:
+        st['erros'].append('estadual: ' + traceback.format_exc()[-400:])
     try:
         tmp = os.path.join(DATA, 'consulta_srocha.db.tmp')
         r = subprocess.run([sys.executable, os.path.join(AQUI, 'ingest.py'), SRC, tmp, os.path.join(DATA, 'rf_oficial.db')],

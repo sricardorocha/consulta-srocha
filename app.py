@@ -9,7 +9,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-VERSAO = '1.0.1'
+VERSAO = '1.1.0'
 DATA = os.environ.get('DATA_DIR', '/data')
 DB = os.path.join(DATA, 'consulta_srocha.db')
 CALC = os.environ.get('CALCULADORA_URL', 'http://calculadora:8080/api')
@@ -134,12 +134,13 @@ def busca(q: str, x_token: str = Header(None), limite: int = 30, fonte: str = No
         return {'resultados': []}
     expr = ' AND '.join(f'"{t}"' for t in termos) if not q.startswith('"') else '"' + ' '.join(termos) + '"'
     c = con()
-    sql = ('select d.id, d.norma_id, d.rotulo, d.texto, n.titulo, n.esfera, n.url_oficial, n.fonte_id '
+    sql = ('select d.id, d.norma_id, d.rotulo, d.texto, n.titulo, n.esfera, coalesce(d.url, n.url_oficial) as url_oficial, n.fonte_id '
            'from busca b join dispositivo d on d.id=b.rowid join norma n on n.id=d.norma_id where busca match ?')
     par = [expr]
     if fonte:
-        sql += ' and n.fonte_id=?'
-        par.append(fonte)
+        fs = [f for f in fonte.split(',') if f][:6]
+        sql += ' and n.fonte_id in (%s)' % ','.join('?' * len(fs))
+        par += fs
     sql += ' order by rank limit ?'
     par.append(max(1, min(limite, 100)))
     res = [{**{k: r[k] for k in ('id', 'norma_id', 'rotulo', 'titulo', 'esfera', 'url_oficial', 'fonte_id')},
@@ -154,7 +155,22 @@ def norma(norma_id: str, x_token: str = Header(None)):
     n = c.execute('select * from norma where id=?', (norma_id,)).fetchone()
     if not n:
         raise HTTPException(404, 'Norma não encontrada.')
-    return {'norma': dict(n), 'dispositivos': linhas(c.execute('select id, rotulo, texto from dispositivo where norma_id=? order by ordem', (norma_id,)))}
+    return {'norma': dict(n), 'dispositivos': linhas(c.execute('select id, rotulo, texto, url from dispositivo where norma_id=? order by ordem', (norma_id,)))}
+
+
+@app.get('/api/normas')
+def normas(x_token: str = Header(None), fonte: str = '', uf: str = ''):
+    """Lista de normas de uma fonte (ex.: sefaz_sp, sefaz_es) com o numero de dispositivos."""
+    _usuario(x_token)
+    sql, par = ('select n.id, n.titulo, n.ementa, n.url_oficial, n.alterado_em, n.uf, n.fonte_id, count(d.id) as dispositivos '
+                'from norma n left join dispositivo d on d.norma_id=n.id where 1=1'), []
+    if fonte:
+        sql += ' and n.fonte_id=?'
+        par.append(fonte)
+    if uf:
+        sql += ' and n.uf=?'
+        par.append(uf.upper())
+    return {'resultados': linhas(con().execute(sql + ' group by n.id order by n.rowid limit 500', par))}
 
 
 @app.get('/api/ncm/{codigo}')

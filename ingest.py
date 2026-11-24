@@ -2,6 +2,7 @@
 """Consulta Srocha - montagem da base unificada (Fase 1).
 
 Uso: python3 ingest.py <pasta_dos_repositorios> <arquivo_saida.db>
+(a pasta <repositorios>/estadual, se existir, traz o RICMS-SP e o RICMS-ES baixados pelo sync.py)
 
 Fontes (todas publicas, clonadas do GitHub):
   - Matheuscfs/legislacao-tributaria : normas federais compiladas (Planalto),
@@ -27,7 +28,7 @@ CREATE TABLE fonte(id TEXT PRIMARY KEY, nome TEXT, tipo TEXT, url TEXT,
 CREATE TABLE norma(id TEXT PRIMARY KEY, fonte_id TEXT, esfera TEXT, uf TEXT, municipio TEXT,
   tipo TEXT, numero TEXT, data TEXT, titulo TEXT, ementa TEXT, url_oficial TEXT,
   texto_compilado INTEGER, alterado_em TEXT);
-CREATE TABLE dispositivo(id INTEGER PRIMARY KEY, norma_id TEXT, rotulo TEXT, ordem INTEGER, texto TEXT);
+CREATE TABLE dispositivo(id INTEGER PRIMARY KEY, norma_id TEXT, rotulo TEXT, ordem INTEGER, texto TEXT, url TEXT);
 CREATE VIRTUAL TABLE busca USING fts5(rotulo, texto, norma_titulo, content='', tokenize='unicode61 remove_diacritics 2');
 CREATE TABLE ncm(codigo TEXT PRIMARY KEY, descricao TEXT, inicio TEXT, fim TEXT, aliquota_ipi TEXT, fonte_id TEXT);
 CREATE TABLE cest(cest TEXT, ncm TEXT, item TEXT, descricao TEXT, revogado INTEGER);
@@ -95,6 +96,29 @@ for r in csv.DictReader(open(os.path.join(MAT, 'normas', 'confaz', 'indice.csv')
                (nid, 'confaz', 'confaz', None, None, r['secao'], None, r['ano'], r['titulo'], r['ementa'],
                 r['url'], 1, r['alterado_em']))
     fatiar(nid, r['titulo'], open(p, encoding='utf-8').read())
+
+# ---------- estadual: RICMS-SP (Sefaz-SP) e RICMS-ES (Sefaz-ES), baixados pelo sync.py ----------
+EST = os.path.join(REPOS, 'estadual')
+if os.path.isdir(EST):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import estadual
+    try:
+        est_st = json.load(open(os.path.join(EST, 'estadual_status.json'), encoding='utf-8'))
+    except Exception:
+        est_st = {}
+    db.executemany('INSERT INTO fonte VALUES (?,?,?,?,?,?,?)', [
+        ('sefaz_sp', 'Sefaz-SP (RICMS/2000 integral)', 'texto de norma', estadual.SP_INTEGRAL, 'oficial',
+         'Texto vigente do site da Sefaz-SP; redacoes anteriores descartadas. Captura diaria.', est_st.get('quando')),
+        ('sefaz_es', 'Sefaz-ES (RICMS consolidado e anexos)', 'texto de norma', estadual.ES_PAGINA, 'oficial',
+         'PDF consolidado "para consulta" da Sefaz-ES; redacoes anteriores retiradas por regra. Captura diaria.', est_st.get('quando')),
+    ])
+    for n, disp in estadual.normas(EST):
+        db.execute('INSERT OR REPLACE INTO norma VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                   (n['id'], n['fonte_id'], n['esfera'], n['uf'], None, n['tipo'], n['numero'], n['data'],
+                    n['titulo'], n['ementa'], n['url_oficial'], 1, n['alterado_em']))
+        for i, (rot, txt, url) in enumerate(disp):
+            cur = db.execute('INSERT INTO dispositivo(norma_id,rotulo,ordem,texto,url) VALUES (?,?,?,?,?)', (n['id'], rot, i, txt, url))
+            db.execute('INSERT INTO busca(rowid,rotulo,texto,norma_titulo) VALUES (?,?,?,?)', (cur.lastrowid, rot, txt, n['titulo']))
 
 # ---------- catalogo (so indice, sem texto) ----------
 for raiz, _, arqs in os.walk(BRU):
