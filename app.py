@@ -9,7 +9,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-VERSAO = '1.0.0'
+VERSAO = '1.0.1'
 DATA = os.environ.get('DATA_DIR', '/data')
 DB = os.path.join(DATA, 'consulta_srocha.db')
 CALC = os.environ.get('CALCULADORA_URL', 'http://calculadora:8080/api')
@@ -26,7 +26,9 @@ def _segredo():
 
 
 SEGREDO = _segredo()
-USUARIOS = dict(p.split(':', 1) for p in os.environ.get('USUARIOS', '').split(';') if ':' in p)
+# usuario sem diferenca de maiusculas/minusculas; espacos, aspas e quebras de linha sobrando sao ignorados
+USUARIOS = {u.strip().strip('"\'').lower(): s.strip().strip('"\'') for u, s in
+            (p.split(':', 1) for p in os.environ.get('USUARIOS', '').strip().strip('"\'').split(';') if ':' in p) if u.strip()}
 VALIDADE = 12 * 3600
 online = {}  # usuario -> ultimo acesso (epoch)
 
@@ -53,7 +55,7 @@ def _usuario(token):
 @app.post('/api/login')
 async def login(req: Request):
     d = await req.json()
-    u, s = (d.get('usuario') or '').strip().lower(), d.get('senha') or ''
+    u, s = (d.get('usuario') or '').strip().lower(), (d.get('senha') or '').strip()
     if u not in USUARIOS or not hmac.compare_digest(USUARIOS[u], s):
         time.sleep(1)
         raise HTTPException(401, 'Usuário ou senha incorretos.')
@@ -101,7 +103,7 @@ def cest_casa(cod, campo):
 # ---------------- rotas ----------------
 @app.get('/api/saude')
 def saude():
-    return {'ok': True, 'versao': VERSAO, 'base': os.path.exists(DB)}
+    return {'ok': True, 'versao': VERSAO, 'base': os.path.exists(DB), 'usuarios_cadastrados': len(USUARIOS)}
 
 
 @app.get('/api/status')
